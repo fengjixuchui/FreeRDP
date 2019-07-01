@@ -37,10 +37,10 @@
 #include <freerdp/client/cliprdr.h>
 #include <freerdp/client/channels.h>
 #include <freerdp/channels/channels.h>
+#include <freerdp/log.h>
 
 #include <winpr/crt.h>
 #include <winpr/synch.h>
-#include <freerdp/log.h>
 
 #include "pf_channels.h"
 #include "pf_gdi.h"
@@ -48,12 +48,13 @@
 #include "pf_common.h"
 #include "pf_client.h"
 #include "pf_context.h"
+#include "pf_update.h"
 #include "pf_log.h"
 
 #define TAG PROXY_TAG("client")
 
 /**
- * Re-negociate with original client after negociation between the proxy
+ * Re-negotiate with original client after negotiation between the proxy
  * and the target has finished.
  */
 static void proxy_server_reactivate(rdpContext* client, rdpContext* target)
@@ -65,29 +66,20 @@ static void proxy_server_reactivate(rdpContext* client, rdpContext* target)
 	client->update->DesktopResize(client);
 }
 
-/**
- * This function is called whenever a new frame starts.
- * It can be used to reset invalidated areas.
- */
-static BOOL pf_client_begin_paint(rdpContext* context)
+static void pf_OnErrorInfo(void* ctx, ErrorInfoEventArgs* e)
 {
-	pClientContext* pc = (pClientContext*) context;
+	pClientContext* pc = (pClientContext*) ctx;
 	proxyData* pdata = pc->pdata;
 	rdpContext* ps = (rdpContext*)pdata->ps;
-	return ps->update->BeginPaint(ps);
-}
 
-/**
- * This function is called when the library completed composing a new
- * frame. Read out the changed areas and blit them to your output device.
- * The image buffer will have the format specified by gdi_init
- */
-static BOOL pf_client_end_paint(rdpContext* context)
-{
-	pClientContext* pc = (pClientContext*) context;
-	proxyData* pdata = pc->pdata;
-	rdpContext* ps = (rdpContext*)pdata->ps;
-	return ps->update->EndPaint(ps);
+	if (e->code != ERRINFO_NONE)
+	{
+		const char* errorMessage = freerdp_get_error_info_string(e->code);
+		WLog_WARN(TAG, "Proxy's client received error info pdu from server: (0x%08"PRIu32"): %s", e->code, errorMessage);
+		/* forward error back to client */
+		freerdp_set_error_info(ps->rdp, e->code);
+		freerdp_send_error_info(ps->rdp);
+	}
 }
 
 /**
@@ -106,6 +98,10 @@ static BOOL pf_client_pre_connect(freerdp* instance)
 	 * Only override it if you plan to implement custom order
 	 * callbacks or deactiveate certain features.
 	 */
+
+	/* currently not supporting GDI orders */
+	ZeroMemory(instance->settings->OrderSupport, 32);
+
 	/**
 	 * Register the channel listeners.
 	 * They are required to set up / tear down channels if they are loaded.
@@ -114,6 +110,7 @@ static BOOL pf_client_pre_connect(freerdp* instance)
 	                                 pf_OnChannelConnectedEventHandler);
 	PubSub_SubscribeChannelDisconnected(instance->context->pubSub,
 	                                    pf_OnChannelDisconnectedEventHandler);
+	PubSub_SubscribeErrorInfo(instance->context->pubSub, pf_OnErrorInfo);
 	/**
 	 * Load all required plugins / channels / libraries specified by current
 	 * settings.
@@ -130,26 +127,9 @@ static BOOL pf_client_pre_connect(freerdp* instance)
 	return TRUE;
 }
 
-
-static BOOL pf_client_bitmap_update(rdpContext* context, const BITMAP_UPDATE* bitmap)
-{
-	pClientContext* pc = (pClientContext*) context;
-	proxyData* pdata = pc->pdata;
-	rdpContext* ps = (rdpContext*)pdata->ps;
-	return ps->update->BitmapUpdate(ps, bitmap);
-}
-
-static BOOL pf_client_desktop_resize(rdpContext* context)
-{
-	pClientContext* pc = (pClientContext*) context;
-	proxyData* pdata = pc->pdata;
-	rdpContext* ps = (rdpContext*)pdata->ps;
-	return ps->update->DesktopResize(ps);
-}
-
 /**
  * Called after a RDP connection was successfully established.
- * Settings might have changed during negociation of client / server feature
+ * Settings might have changed during negotiation of client / server feature
  * support.
  *
  * Set up local framebuffers and painting callbacks.
@@ -164,13 +144,20 @@ static BOOL pf_client_post_connect(freerdp* instance)
 	pClientContext* pc;
 	rdpContext* ps;
 
-	if (!gdi_init(instance, PIXEL_FORMAT_XRGB32))
-		return FALSE;
-
 	context = instance->context;
 	settings = instance->settings;
 	update = instance->update;
 	pc = (pClientContext*) context;
+	ps = (rdpContext*) pc->pdata->ps;
+
+	if (!proxy_data_set_connection_info(pc->pdata, ps->settings, settings))
+	{
+		WLog_ERR(TAG, "proxy_data_set_connection_info failed!");
+		return FALSE;
+	}
+
+	if (!gdi_init(instance, PIXEL_FORMAT_XRGB32))
+		return FALSE;
 
 	if (!pf_register_pointer(context->graphics))
 		return FALSE;
@@ -184,18 +171,14 @@ static BOOL pf_client_post_connect(freerdp* instance)
 		}
 
 		pf_gdi_register_update_callbacks(update);
-		brush_cache_register_callbacks(instance->update);
-		glyph_cache_register_callbacks(instance->update);
-		bitmap_cache_register_callbacks(instance->update);
-		offscreen_cache_register_callbacks(instance->update);
-		palette_cache_register_callbacks(instance->update);
+		brush_cache_register_callbacks(update);
+		glyph_cache_register_callbacks(update);
+		bitmap_cache_register_callbacks(update);
+		offscreen_cache_register_callbacks(update);
+		palette_cache_register_callbacks(update);
 	}
-
-	update->BeginPaint = pf_client_begin_paint;
-	update->EndPaint = pf_client_end_paint;
-	update->BitmapUpdate = pf_client_bitmap_update;
-	update->DesktopResize = pf_client_desktop_resize;
-	ps = (rdpContext*) pc->pdata->ps;
+	
+	pf_client_register_update_callbacks(update);
 	proxy_server_reactivate(ps, context);
 	return TRUE;
 }
@@ -208,8 +191,6 @@ static void pf_client_post_disconnect(freerdp* instance)
 {
 	pClientContext* context;
 	proxyData* pdata;
-	rdpContext* ps;
-	freerdp_peer* peer;
 
 	if (!instance)
 		return;
@@ -219,21 +200,15 @@ static void pf_client_post_disconnect(freerdp* instance)
 
 	context = (pClientContext*) instance->context;
 	pdata = context->pdata;
+
 	PubSub_UnsubscribeChannelConnected(instance->context->pubSub,
 	                                   pf_OnChannelConnectedEventHandler);
 	PubSub_UnsubscribeChannelDisconnected(instance->context->pubSub,
 	                                      pf_OnChannelDisconnectedEventHandler);
+	PubSub_UnsubscribeErrorInfo(instance->context->pubSub, pf_OnErrorInfo);
 	gdi_free(instance);
-	ps = (rdpContext*) pdata->ps;
 
-	if (!pf_common_connection_aborted_by_peer(pdata))
-	{
-		SetEvent(pdata->connectionClosed);
-		WLog_INFO(TAG, "connectionClosed event is not set; closing connection with client");
-		peer = ps->peer;
-		peer->Disconnect(peer);
-	}
-
+	SetEvent(pdata->connectionClosed);
 	/* It's important to avoid calling `freerdp_peer_context_free` and `freerdp_peer_free` here,
 	 * in order to avoid double-free. Those objects will be freed by the server when needed.
 	 */
@@ -389,6 +364,22 @@ static BOOL pf_client_client_new(freerdp* instance, rdpContext* context)
 	return TRUE;
 }
 
+static int pf_client_client_stop(rdpContext* context)
+{
+	pClientContext* pc = (pClientContext*) context;
+	pServerContext* ps = pc->pdata->ps;
+	freerdp_abort_connect(context->instance);
+
+	if (ps->thread)
+	{
+		WaitForSingleObject(ps->thread, INFINITE);
+		CloseHandle(ps->thread);
+		ps->thread = NULL;
+	}
+
+	return 0;
+}
+
 int RdpClientEntry(RDP_CLIENT_ENTRY_POINTS* pEntryPoints)
 {
 	ZeroMemory(pEntryPoints, sizeof(RDP_CLIENT_ENTRY_POINTS));
@@ -398,6 +389,7 @@ int RdpClientEntry(RDP_CLIENT_ENTRY_POINTS* pEntryPoints)
 	pEntryPoints->ContextSize = sizeof(pClientContext);
 	/* Client init and finish */
 	pEntryPoints->ClientNew = pf_client_client_new;
+	pEntryPoints->ClientStop = pf_client_client_stop;
 	return 0;
 }
 

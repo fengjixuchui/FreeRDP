@@ -51,6 +51,7 @@ void pf_common_copy_settings(rdpSettings* dst, rdpSettings* src)
 	dst->DesktopOrientation = src->DesktopOrientation;
 	dst->DesktopScaleFactor = src->DesktopScaleFactor;
 	dst->DeviceScaleFactor = src->DeviceScaleFactor;
+	dst->SupportMonitorLayoutPdu = src->SupportMonitorLayoutPdu;
 	/* client info */
 	dst->AutoLogonEnabled = src->AutoLogonEnabled;
 	dst->CompressionEnabled = src->CompressionEnabled;
@@ -104,4 +105,8 @@ void pf_common_copy_settings(rdpSettings* dst, rdpSettings* src)
 	dst->GfxAVC444 = src->GfxAVC444;
 	dst->GfxSendQoeAck = src->GfxSendQoeAck;
 	dst->GfxAVC444v2 = src->GfxAVC444v2;
+	dst->SupportDisplayControl = src->SupportDisplayControl;
+	dst->SupportMonitorLayoutPdu = src->SupportMonitorLayoutPdu;
+	dst->DynamicResolutionUpdate = src->DynamicResolutionUpdate;
+	dst->DesktopResize = src->DesktopResize;
 }

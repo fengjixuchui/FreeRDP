@@ -105,6 +105,7 @@ option(WITH_DEBUG_CERTIFICATE "Print certificate related debug messages." ${DEFA
 option(WITH_DEBUG_CAPABILITIES "Print capability negotiation debug messages." ${DEFAULT_DEBUG_OPTION})
 option(WITH_DEBUG_CHANNELS "Print channel manager debug messages." ${DEFAULT_DEBUG_OPTION})
 option(WITH_DEBUG_CLIPRDR "Print clipboard redirection debug messages" ${DEFAULT_DEBUG_OPTION})
+option(WITH_DEBUG_RDPGFX "Print RDPGFX debug messages" ${DEFAULT_DEBUG_OPTION})
 option(WITH_DEBUG_DVC "Print dynamic virtual channel debug messages." ${DEFAULT_DEBUG_OPTION})
 option(WITH_DEBUG_TSMF "Print TSMF virtual channel debug messages." ${DEFAULT_DEBUG_OPTION})
 option(WITH_DEBUG_KBD "Print keyboard related debug messages." ${DEFAULT_DEBUG_OPTION})
@@ -135,6 +136,7 @@ option(WITH_DEBUG_RINGBUFFER "Enable Ringbuffer debug messages" ${DEFAULT_DEBUG_
 
 option(WITH_DEBUG_SYMBOLS "Pack debug symbols to installer" OFF)
 option(WITH_CCACHE "Use ccache support if available" ON)
+option(WITH_CLANG_FORMAT "Detect clang-format. run 'cmake --build . --target clangformat' to format." ON)
 option(WITH_ICU "Use ICU for unicode conversion" OFF)
 option(WITH_GSSAPI "Compile support for kerberos authentication. (EXPERIMENTAL)" OFF)
 
